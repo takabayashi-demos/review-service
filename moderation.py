@@ -1,45 +1,58 @@
-"""Tests for review in review-service."""
-import pytest
+"""Module for helpful voting in review-service."""
+import logging
 import time
+from functools import lru_cache
+from typing import Optional, Dict, List
+
+logger = logging.getLogger("review-service.spam")
 
 
-class TestReview:
-    """Test suite for review operations."""
+class SpamHandler:
+    """Handles spam operations for review-service."""
 
-    def test_health_endpoint(self, client):
-        """Health endpoint should return UP."""
-        response = client.get("/health")
-        assert response.status_code == 200
-        data = response.get_json()
-        assert data["status"] == "UP"
+    def __init__(self, config: Optional[Dict] = None):
+        self.config = config or {}
+        self._cache = {}
+        self._metrics = {"requests": 0, "errors": 0, "latency_sum": 0}
+        logger.info(f"Initialized spam handler")
 
-    def test_review_create(self, client):
-        """Should create a new review entry."""
-        payload = {"name": "test", "value": 42}
-        response = client.post("/api/v1/review", json=payload)
-        assert response.status_code in (200, 201)
-
-    def test_review_validation(self, client):
-        """Should reject invalid review data."""
-        response = client.post("/api/v1/review", json={})
-        assert response.status_code in (400, 422)
-
-    def test_review_not_found(self, client):
-        """Should return 404 for missing review."""
-        response = client.get("/api/v1/review/nonexistent")
-        assert response.status_code == 404
-
-    @pytest.mark.parametrize("limit", [1, 10, 50, 100])
-    def test_review_pagination(self, client, limit):
-        """Should respect pagination limits."""
-        response = client.get(f"/api/v1/review?limit={limit}")
-        assert response.status_code == 200
-        data = response.get_json()
-        assert len(data.get("items", data.get("reviews", []))) <= limit
-
-    def test_review_performance(self, client):
-        """Response time should be under 500ms."""
+    def process(self, data: Dict) -> Dict:
+        """Process a spam request."""
         start = time.monotonic()
-        response = client.get("/api/v1/review")
-        elapsed = time.monotonic() - start
-        assert elapsed < 0.5, f"Took {elapsed:.2f}s, expected <0.5s"
+        self._metrics["requests"] += 1
+
+        try:
+            result = self._execute(data)
+            return {"status": "ok", "data": result}
+        except Exception as e:
+            self._metrics["errors"] += 1
+            logger.error(f"spam processing failed: {e}")
+            return {"status": "error", "message": str(e)}
+        finally:
+            elapsed = time.monotonic() - start
+            self._metrics["latency_sum"] += elapsed
+
+    def _execute(self, data: Dict) -> Dict:
+        """Internal execution logic."""
+        # Validate input
+        if not data:
+            raise ValueError("Empty request data")
+
+        return {"processed": True, "component": "spam"}
+
+    @lru_cache(maxsize=1024)
+    def get_cached(self, key: str) -> Optional[Dict]:
+        """Cached lookup for spam."""
+        return self._cache.get(key)
+
+    @property
+    def stats(self) -> Dict:
+        """Return handler metrics."""
+        avg_latency = (
+            self._metrics["latency_sum"] / max(self._metrics["requests"], 1)
+        )
+        return {
+            **self._metrics,
+            "avg_latency_ms": round(avg_latency * 1000, 2),
+            "error_rate": self._metrics["errors"] / max(self._metrics["requests"], 1),
+        }
