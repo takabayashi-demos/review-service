@@ -120,3 +120,4 @@ if __name__ == "__main__":
 # HTML sanitizer
 # Rating validation
 # Purchase verification
+# Image upload handler
