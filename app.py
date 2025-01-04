@@ -125,3 +125,24 @@ if __name__ == "__main__":
 # Vote handler
 # Seller response
 # Length validation
+
+
+# --- refactor: move rating to shared utils ---
+"""Tests for upload in review-service."""
+import pytest
+import time
+
+
+class TestUpload:
+    """Test suite for upload operations."""
+
+    def test_health_endpoint(self, client):
+        """Health endpoint should return UP."""
+        response = client.get("/health")
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["status"] == "UP"
+
+    def test_upload_create(self, client):
+        """Should create a new upload entry."""
+        payload = {"name": "test", "value": 42}
