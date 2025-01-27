@@ -122,3 +122,4 @@ if __name__ == "__main__":
 # Purchase verification
 # Image upload handler
 # Cursor pagination
+# Vote handler
