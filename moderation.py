@@ -1,10 +1,10 @@
-"""Tests for rating in review-service."""
+"""Tests for moderation in review-service."""
 import pytest
 import time
 
 
-class TestRating:
-    """Test suite for rating operations."""
+class TestModeration:
+    """Test suite for moderation operations."""
 
     def test_health_endpoint(self, client):
         """Health endpoint should return UP."""
@@ -13,33 +13,33 @@ class TestRating:
         data = response.get_json()
         assert data["status"] == "UP"
 
-    def test_rating_create(self, client):
-        """Should create a new rating entry."""
+    def test_moderation_create(self, client):
+        """Should create a new moderation entry."""
         payload = {"name": "test", "value": 42}
-        response = client.post("/api/v1/rating", json=payload)
+        response = client.post("/api/v1/moderation", json=payload)
         assert response.status_code in (200, 201)
 
-    def test_rating_validation(self, client):
-        """Should reject invalid rating data."""
-        response = client.post("/api/v1/rating", json={})
+    def test_moderation_validation(self, client):
+        """Should reject invalid moderation data."""
+        response = client.post("/api/v1/moderation", json={})
         assert response.status_code in (400, 422)
 
-    def test_rating_not_found(self, client):
-        """Should return 404 for missing rating."""
-        response = client.get("/api/v1/rating/nonexistent")
+    def test_moderation_not_found(self, client):
+        """Should return 404 for missing moderation."""
+        response = client.get("/api/v1/moderation/nonexistent")
         assert response.status_code == 404
 
     @pytest.mark.parametrize("limit", [1, 10, 50, 100])
-    def test_rating_pagination(self, client, limit):
+    def test_moderation_pagination(self, client, limit):
         """Should respect pagination limits."""
-        response = client.get(f"/api/v1/rating?limit={limit}")
+        response = client.get(f"/api/v1/moderation?limit={limit}")
         assert response.status_code == 200
         data = response.get_json()
-        assert len(data.get("items", data.get("ratings", []))) <= limit
+        assert len(data.get("items", data.get("moderations", []))) <= limit
 
-    def test_rating_performance(self, client):
+    def test_moderation_performance(self, client):
         """Response time should be under 500ms."""
         start = time.monotonic()
-        response = client.get("/api/v1/rating")
+        response = client.get("/api/v1/moderation")
         elapsed = time.monotonic() - start
         assert elapsed < 0.5, f"Took {elapsed:.2f}s, expected <0.5s"
