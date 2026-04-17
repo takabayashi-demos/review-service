@@ -50,6 +50,28 @@ def log_with_context(level, message, **kwargs):
     extra.update(kwargs)
     getattr(logger, level)(message, extra=extra)
 
+def calculate_review_statistics():
+    """Calculate aggregate statistics across all reviews.
+    
+    Returns:
+        dict: Statistics including totals, averages, and rating distribution
+    """
+    total_reviews = sum(len(reviews) for reviews in reviews_db.values())
+    products_reviewed = len(reviews_db)
+    all_ratings = [r["rating"] for reviews in reviews_db.values() for r in reviews]
+    avg_rating = sum(all_ratings) / len(all_ratings) if all_ratings else 0
+    
+    rating_distribution = {
+        str(i): len([r for r in all_ratings if r == i]) for i in range(1, 6)
+    }
+    
+    return {
+        "total_reviews": total_reviews,
+        "products_reviewed": products_reviewed,
+        "average_rating": round(avg_rating, 1),
+        "rating_distribution": rating_distribution,
+    }
+
 @app.route("/health")
 def health():
     return jsonify({"status": "UP", "service": SERVICE_NAME, "version": SERVICE_VERSION})
@@ -119,19 +141,8 @@ def create_review():
 @app.route("/api/v1/reviews/stats")
 def review_stats():
     log_with_context('info', 'Calculating review statistics')
-    total_reviews = sum(len(reviews) for reviews in reviews_db.values())
-    products_reviewed = len(reviews_db)
-    all_ratings = [r["rating"] for reviews in reviews_db.values() for r in reviews]
-    avg_rating = sum(all_ratings) / len(all_ratings) if all_ratings else 0
-
-    return jsonify({
-        "total_reviews": total_reviews,
-        "products_reviewed": products_reviewed,
-        "average_rating": round(avg_rating, 1),
-        "rating_distribution": {
-            str(i): len([r for r in all_ratings if r == i]) for i in range(1, 6)
-        },
-    })
+    stats = calculate_review_statistics()
+    return jsonify(stats)
 
 @app.route("/metrics")
 def metrics():
