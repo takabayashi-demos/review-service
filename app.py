@@ -6,11 +6,14 @@ INTENTIONAL ISSUES (for demo):
 - No input length validation (bug)
 - Unescaped HTML output (vulnerability)
 """
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
 import os, time, random, logging, uuid
 
 app = Flask(__name__)
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - [%(correlation_id)s] - %(message)s'
+)
 logger = logging.getLogger("review-service")
 
 # Service metadata constants
@@ -37,6 +40,16 @@ reviews_db = {
 
 review_counter = 4
 
+@app.before_request
+def before_request():
+    g.correlation_id = request.headers.get('X-Correlation-ID', str(uuid.uuid4()))
+
+def log_with_context(level, message, **kwargs):
+    """Log message with correlation ID and additional context."""
+    extra = {'correlation_id': getattr(g, 'correlation_id', 'no-correlation-id')}
+    extra.update(kwargs)
+    getattr(logger, level)(message, extra=extra)
+
 @app.route("/health")
 def health():
     return jsonify({"status": "UP", "service": SERVICE_NAME, "version": SERVICE_VERSION})
@@ -47,11 +60,16 @@ def ready():
 
 @app.route("/api/v1/reviews/<product_id>")
 def get_reviews(product_id):
+    log_with_context('info', f'Fetching reviews for product: {product_id}')
     product_reviews = reviews_db.get(product_id, [])
+    
     if not product_reviews:
+        log_with_context('info', f'No reviews found for product: {product_id}')
         return jsonify({"product_id": product_id, "reviews": [], "average_rating": 0, "total": 0})
 
     avg = sum(r["rating"] for r in product_reviews) / len(product_reviews)
+    log_with_context('info', f'Retrieved {len(product_reviews)} reviews for product: {product_id}')
+    
     return jsonify({
         "product_id": product_id,
         "reviews": product_reviews,
@@ -95,10 +113,12 @@ def create_review():
         reviews_db[product_id] = []
     reviews_db[product_id].append(review)
 
+    log_with_context('info', f'Created review {review["id"]} for product: {product_id}')
     return jsonify(review), 201
 
 @app.route("/api/v1/reviews/stats")
 def review_stats():
+    log_with_context('info', 'Calculating review statistics')
     total_reviews = sum(len(reviews) for reviews in reviews_db.values())
     products_reviewed = len(reviews_db)
     all_ratings = [r["rating"] for reviews in reviews_db.values() for r in reviews]
