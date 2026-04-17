@@ -7,11 +7,20 @@ INTENTIONAL ISSUES (for demo):
 - Unescaped HTML output (vulnerability)
 """
 from flask import Flask, request, jsonify
-import os, time, random, logging
+import os, time, random, logging, uuid
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("review-service")
+
+# Service metadata constants
+SERVICE_NAME = "review-service"
+SERVICE_VERSION = "1.4.2"
+
+# Default values
+DEFAULT_USER_ID = "anonymous"
+DEFAULT_HELPFUL_VOTES = 0
+DEFAULT_VERIFIED_PURCHASE = False
 
 reviews_db = {
     "P001": [
@@ -30,7 +39,7 @@ review_counter = 4
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "UP", "service": "review-service", "version": "1.4.2"})
+    return jsonify({"status": "UP", "service": SERVICE_NAME, "version": SERVICE_VERSION})
 
 @app.route("/ready")
 def ready():
@@ -73,12 +82,12 @@ def create_review():
     review = {
         "id": f"REV-{review_counter:03d}",
         "product_id": product_id,
-        "user_id": data.get("user_id", "anonymous"),
+        "user_id": data.get("user_id", DEFAULT_USER_ID),
         "rating": rating,
         "title": title,
         "body": body,  # ❌ Stored unsanitized
-        "verified_purchase": False,
-        "helpful_votes": 0,
+        "verified_purchase": DEFAULT_VERIFIED_PURCHASE,
+        "helpful_votes": DEFAULT_HELPFUL_VOTES,
         "created_at": time.strftime("%Y-%m-%d"),
     }
 
@@ -107,42 +116,14 @@ def review_stats():
 @app.route("/metrics")
 def metrics():
     total = sum(len(r) for r in reviews_db.values())
-    return f"""# HELP reviews_total Total reviews stored
+    return f"""# HELP reviews_total Total number of reviews
 # TYPE reviews_total gauge
 reviews_total {total}
-# HELP review_service_up Service health
-# TYPE review_service_up gauge
-review_service_up 1
-"""
+# HELP products_with_reviews_total Total products with reviews
+# TYPE products_with_reviews_total gauge
+products_with_reviews_total {len(reviews_db)}
+""", 200, {"Content-Type": "text/plain"}
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
-# HTML sanitizer
-# Rating validation
-# Purchase verification
-# Image upload handler
-# Cursor pagination
-# Vote handler
-# Seller response
-# Length validation
-
-
-# --- refactor: move rating to shared utils ---
-"""Tests for upload in review-service."""
-import pytest
-import time
-
-
-class TestUpload:
-    """Test suite for upload operations."""
-
-    def test_health_endpoint(self, client):
-        """Health endpoint should return UP."""
-        response = client.get("/health")
-        assert response.status_code == 200
-        data = response.get_json()
-        assert data["status"] == "UP"
-
-    def test_upload_create(self, client):
-        """Should create a new upload entry."""
-        payload = {"name": "test", "value": 42}
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port, debug=False)
