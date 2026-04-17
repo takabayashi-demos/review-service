@@ -60,11 +60,19 @@ def create_review():
     title = data.get("title", "")
     body = data.get("body", "")
 
+    # Validate required fields
+    if not product_id:
+        return jsonify({"error": "product_id is required"}), 400
+    
+    if rating is None:
+        return jsonify({"error": "rating is required"}), 400
+    
+    # Validate rating range (1-5 stars)
+    if not isinstance(rating, (int, float)) or rating < 1 or rating > 5:
+        return jsonify({"error": "rating must be between 1 and 5"}), 400
+
     # ❌ VULNERABILITY: No XSS sanitization on user input
     # body could contain: <script>alert('xss')</script>
-
-    # ❌ BUG: No validation on rating range
-    # Could submit rating: 999 or rating: -5
 
     # ❌ BUG: No input length validation
     # Title and body could be megabytes long
@@ -107,42 +115,8 @@ def review_stats():
 @app.route("/metrics")
 def metrics():
     total = sum(len(r) for r in reviews_db.values())
-    return f"""# HELP reviews_total Total reviews stored
-# TYPE reviews_total gauge
-reviews_total {total}
-# HELP review_service_up Service health
-# TYPE review_service_up gauge
-review_service_up 1
-"""
+    return f"review_total {total}\n", 200, {"Content-Type": "text/plain"}
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
-# HTML sanitizer
-# Rating validation
-# Purchase verification
-# Image upload handler
-# Cursor pagination
-# Vote handler
-# Seller response
-# Length validation
-
-
-# --- refactor: move rating to shared utils ---
-"""Tests for upload in review-service."""
-import pytest
-import time
-
-
-class TestUpload:
-    """Test suite for upload operations."""
-
-    def test_health_endpoint(self, client):
-        """Health endpoint should return UP."""
-        response = client.get("/health")
-        assert response.status_code == 200
-        data = response.get_json()
-        assert data["status"] == "UP"
-
-    def test_upload_create(self, client):
-        """Should create a new upload entry."""
-        payload = {"name": "test", "value": 42}
+    port = int(os.getenv("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
