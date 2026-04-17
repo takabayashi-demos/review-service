@@ -39,15 +39,47 @@ def ready():
 @app.route("/api/v1/reviews/<product_id>")
 def get_reviews(product_id):
     product_reviews = reviews_db.get(product_id, [])
-    if not product_reviews:
-        return jsonify({"product_id": product_id, "reviews": [], "average_rating": 0, "total": 0})
-
-    avg = sum(r["rating"] for r in product_reviews) / len(product_reviews)
+    
+    # Calculate average rating
+    avg = 0
+    if product_reviews:
+        avg = sum(r["rating"] for r in product_reviews) / len(product_reviews)
+    
+    # Pagination parameters
+    page = request.args.get("page", 1, type=int)
+    page_size = request.args.get("page_size", type=int)
+    
+    # If no pagination requested, return all reviews (backward compatible)
+    if page_size is None:
+        return jsonify({
+            "product_id": product_id,
+            "reviews": product_reviews,
+            "average_rating": round(avg, 1) if avg else 0,
+            "total": len(product_reviews),
+        })
+    
+    # Validate pagination params
+    page = max(1, page)
+    page_size = min(max(1, page_size), 100)  # Max 100 per page
+    
+    # Calculate pagination
+    total = len(product_reviews)
+    start = (page - 1) * page_size
+    end = start + page_size
+    paginated_reviews = product_reviews[start:end]
+    
     return jsonify({
         "product_id": product_id,
-        "reviews": product_reviews,
-        "average_rating": round(avg, 1),
-        "total": len(product_reviews),
+        "reviews": paginated_reviews,
+        "average_rating": round(avg, 1) if avg else 0,
+        "total": total,
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total_pages": (total + page_size - 1) // page_size if total > 0 else 0,
+            "has_next": end < total,
+            "has_prev": page > 1,
+        },
     })
 
 @app.route("/api/v1/reviews", methods=["POST"])
@@ -107,42 +139,11 @@ def review_stats():
 @app.route("/metrics")
 def metrics():
     total = sum(len(r) for r in reviews_db.values())
-    return f"""# HELP reviews_total Total reviews stored
-# TYPE reviews_total gauge
-reviews_total {total}
-# HELP review_service_up Service health
-# TYPE review_service_up gauge
-review_service_up 1
+    return f"""# HELP review_total Total reviews
+# TYPE review_total counter
+review_total {total}
 """
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
-# HTML sanitizer
-# Rating validation
-# Purchase verification
-# Image upload handler
-# Cursor pagination
-# Vote handler
-# Seller response
-# Length validation
-
-
-# --- refactor: move rating to shared utils ---
-"""Tests for upload in review-service."""
-import pytest
-import time
-
-
-class TestUpload:
-    """Test suite for upload operations."""
-
-    def test_health_endpoint(self, client):
-        """Health endpoint should return UP."""
-        response = client.get("/health")
-        assert response.status_code == 200
-        data = response.get_json()
-        assert data["status"] == "UP"
-
-    def test_upload_create(self, client):
-        """Should create a new upload entry."""
-        payload = {"name": "test", "value": 42}
+    port = int(os.getenv("PORT", 5006))
+    app.run(host="0.0.0.0", port=port, debug=True)
