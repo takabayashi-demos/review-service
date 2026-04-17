@@ -7,7 +7,7 @@ INTENTIONAL ISSUES (for demo):
 - Unescaped HTML output (vulnerability)
 """
 from flask import Flask, request, jsonify
-import os, time, random, logging
+import os, time, random, logging, html
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.DEBUG)
@@ -27,6 +27,12 @@ reviews_db = {
 }
 
 review_counter = 4
+
+# Input validation constants
+MAX_TITLE_LENGTH = 200
+MAX_BODY_LENGTH = 5000
+MIN_RATING = 1
+MAX_RATING = 5
 
 @app.route("/health")
 def health():
@@ -60,14 +66,30 @@ def create_review():
     title = data.get("title", "")
     body = data.get("body", "")
 
-    # ❌ VULNERABILITY: No XSS sanitization on user input
-    # body could contain: <script>alert('xss')</script>
+    # Validation
+    if not product_id:
+        return jsonify({"error": "product_id is required"}), 400
+    
+    if rating is None:
+        return jsonify({"error": "rating is required"}), 400
+    
+    try:
+        rating = int(rating)
+        if rating < MIN_RATING or rating > MAX_RATING:
+            return jsonify({"error": f"rating must be between {MIN_RATING} and {MAX_RATING}"}), 400
+    except (ValueError, TypeError):
+        return jsonify({"error": "rating must be a valid integer"}), 400
 
-    # ❌ BUG: No validation on rating range
-    # Could submit rating: 999 or rating: -5
+    # Length validation
+    if len(title) > MAX_TITLE_LENGTH:
+        return jsonify({"error": f"title must be {MAX_TITLE_LENGTH} characters or less"}), 400
+    
+    if len(body) > MAX_BODY_LENGTH:
+        return jsonify({"error": f"body must be {MAX_BODY_LENGTH} characters or less"}), 400
 
-    # ❌ BUG: No input length validation
-    # Title and body could be megabytes long
+    # Sanitize user input to prevent XSS
+    sanitized_title = html.escape(title)
+    sanitized_body = html.escape(body)
 
     review_counter += 1
     review = {
@@ -75,8 +97,8 @@ def create_review():
         "product_id": product_id,
         "user_id": data.get("user_id", "anonymous"),
         "rating": rating,
-        "title": title,
-        "body": body,  # ❌ Stored unsanitized
+        "title": sanitized_title,
+        "body": sanitized_body,
         "verified_purchase": False,
         "helpful_votes": 0,
         "created_at": time.strftime("%Y-%m-%d"),
@@ -107,42 +129,11 @@ def review_stats():
 @app.route("/metrics")
 def metrics():
     total = sum(len(r) for r in reviews_db.values())
-    return f"""# HELP reviews_total Total reviews stored
-# TYPE reviews_total gauge
-reviews_total {total}
-# HELP review_service_up Service health
-# TYPE review_service_up gauge
-review_service_up 1
-"""
+    return f"""# HELP review_total Total number of reviews
+# TYPE review_total counter
+review_total {total}
+""", 200, {"Content-Type": "text/plain"}
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
-# HTML sanitizer
-# Rating validation
-# Purchase verification
-# Image upload handler
-# Cursor pagination
-# Vote handler
-# Seller response
-# Length validation
-
-
-# --- refactor: move rating to shared utils ---
-"""Tests for upload in review-service."""
-import pytest
-import time
-
-
-class TestUpload:
-    """Test suite for upload operations."""
-
-    def test_health_endpoint(self, client):
-        """Health endpoint should return UP."""
-        response = client.get("/health")
-        assert response.status_code == 200
-        data = response.get_json()
-        assert data["status"] == "UP"
-
-    def test_upload_create(self, client):
-        """Should create a new upload entry."""
-        payload = {"name": "test", "value": 42}
+    port = int(os.getenv("PORT", 5004))
+    app.run(host="0.0.0.0", port=port, debug=True)
