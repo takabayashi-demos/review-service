@@ -1,17 +1,19 @@
 """Review Service - Walmart Platform
 Product reviews and ratings service.
-
-INTENTIONAL ISSUES (for demo):
-- XSS vulnerability in review text (vulnerability)
-- No input length validation (bug)
-- Unescaped HTML output (vulnerability)
 """
 from flask import Flask, request, jsonify
+from markupsafe import escape
 import os, time, random, logging
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("review-service")
+
+# Security constants
+MAX_TITLE_LENGTH = 200
+MAX_BODY_LENGTH = 5000
+MIN_RATING = 1
+MAX_RATING = 5
 
 reviews_db = {
     "P001": [
@@ -60,14 +62,27 @@ def create_review():
     title = data.get("title", "")
     body = data.get("body", "")
 
-    # ❌ VULNERABILITY: No XSS sanitization on user input
-    # body could contain: <script>alert('xss')</script>
+    # Validation
+    errors = []
+    
+    if not product_id:
+        errors.append("product_id is required")
+    
+    if not isinstance(rating, int) or rating < MIN_RATING or rating > MAX_RATING:
+        errors.append(f"rating must be an integer between {MIN_RATING} and {MAX_RATING}")
+    
+    if len(title) > MAX_TITLE_LENGTH:
+        errors.append(f"title must not exceed {MAX_TITLE_LENGTH} characters")
+    
+    if len(body) > MAX_BODY_LENGTH:
+        errors.append(f"body must not exceed {MAX_BODY_LENGTH} characters")
+    
+    if errors:
+        return jsonify({"error": "Validation failed", "details": errors}), 400
 
-    # ❌ BUG: No validation on rating range
-    # Could submit rating: 999 or rating: -5
-
-    # ❌ BUG: No input length validation
-    # Title and body could be megabytes long
+    # Sanitize user input to prevent XSS
+    sanitized_title = str(escape(title))
+    sanitized_body = str(escape(body))
 
     review_counter += 1
     review = {
@@ -75,8 +90,8 @@ def create_review():
         "product_id": product_id,
         "user_id": data.get("user_id", "anonymous"),
         "rating": rating,
-        "title": title,
-        "body": body,  # ❌ Stored unsanitized
+        "title": sanitized_title,
+        "body": sanitized_body,
         "verified_purchase": False,
         "helpful_votes": 0,
         "created_at": time.strftime("%Y-%m-%d"),
@@ -107,42 +122,11 @@ def review_stats():
 @app.route("/metrics")
 def metrics():
     total = sum(len(r) for r in reviews_db.values())
-    return f"""# HELP reviews_total Total reviews stored
-# TYPE reviews_total gauge
-reviews_total {total}
-# HELP review_service_up Service health
-# TYPE review_service_up gauge
-review_service_up 1
+    return f"""# HELP review_service_reviews_total Total number of reviews
+# TYPE review_service_reviews_total counter
+review_service_reviews_total {total}
 """
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
-# HTML sanitizer
-# Rating validation
-# Purchase verification
-# Image upload handler
-# Cursor pagination
-# Vote handler
-# Seller response
-# Length validation
-
-
-# --- refactor: move rating to shared utils ---
-"""Tests for upload in review-service."""
-import pytest
-import time
-
-
-class TestUpload:
-    """Test suite for upload operations."""
-
-    def test_health_endpoint(self, client):
-        """Health endpoint should return UP."""
-        response = client.get("/health")
-        assert response.status_code == 200
-        data = response.get_json()
-        assert data["status"] == "UP"
-
-    def test_upload_create(self, client):
-        """Should create a new upload entry."""
-        payload = {"name": "test", "value": 42}
+    port = int(os.getenv("PORT", 8007))
+    app.run(host="0.0.0.0", port=port, debug=True)

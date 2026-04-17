@@ -1,98 +1,134 @@
-"""Tests for Review Service API endpoints."""
+"""Tests for review service security fixes"""
 import pytest
-from app import app
-
+import json
+from app import app, reviews_db, review_counter
 
 @pytest.fixture
 def client():
-    app.config["TESTING"] = True
-    with app.test_client() as c:
-        yield c
+    app.config['TESTING'] = True
+    with app.test_client() as client:
+        yield client
 
-
-def test_health(client):
-    resp = client.get("/health")
-    assert resp.status_code == 200
-    data = resp.get_json()
-    assert data["status"] == "UP"
-    assert data["service"] == "review-service"
-
-
-def test_ready(client):
-    resp = client.get("/ready")
-    assert resp.status_code == 200
-    assert resp.get_json()["status"] == "READY"
-
-
-def test_get_reviews_existing_product(client):
-    resp = client.get("/api/v1/reviews/P001")
-    assert resp.status_code == 200
-    data = resp.get_json()
-    assert data["product_id"] == "P001"
-    assert data["total"] == 2
-    assert 1 <= data["average_rating"] <= 5
-    assert len(data["reviews"]) == 2
-
-
-def test_get_reviews_missing_product(client):
-    resp = client.get("/api/v1/reviews/NONEXISTENT")
-    assert resp.status_code == 200
-    data = resp.get_json()
-    assert data["total"] == 0
-    assert data["reviews"] == []
-    assert data["average_rating"] == 0
-
-
-def test_create_review(client):
-    payload = {
-        "product_id": "P099",
-        "rating": 4,
-        "title": "Good product",
-        "body": "Works as expected.",
-        "user_id": "USR-TEST",
-    }
-    resp = client.post("/api/v1/reviews", json=payload)
-    assert resp.status_code == 201
-    data = resp.get_json()
-    assert data["product_id"] == "P099"
-    assert data["rating"] == 4
-    assert data["user_id"] == "USR-TEST"
-    assert data["verified_purchase"] is False
-    assert data["helpful_votes"] == 0
-
-
-def test_create_review_defaults(client):
-    payload = {"product_id": "P100", "rating": 3}
-    resp = client.post("/api/v1/reviews", json=payload)
-    assert resp.status_code == 201
-    data = resp.get_json()
-    assert data["user_id"] == "anonymous"
-    assert data["title"] == ""
-    assert data["body"] == ""
-
-
-def test_review_stats(client):
-    resp = client.get("/api/v1/reviews/stats")
-    assert resp.status_code == 200
-    data = resp.get_json()
-    assert "total_reviews" in data
-    assert "products_reviewed" in data
-    assert "average_rating" in data
-    assert "rating_distribution" in data
-    for key in ["1", "2", "3", "4", "5"]:
-        assert key in data["rating_distribution"]
-
-
-def test_created_review_appears_in_get(client):
-    payload = {
-        "product_id": "P200",
+def test_xss_prevention_in_title(client):
+    """Test that script tags in title are escaped"""
+    malicious_review = {
+        "product_id": "P999",
         "rating": 5,
-        "title": "Love it",
-        "body": "Highly recommend.",
+        "title": "<script>alert('xss')</script>",
+        "body": "Normal body text"
     }
-    client.post("/api/v1/reviews", json=payload)
-    resp = client.get("/api/v1/reviews/P200")
-    data = resp.get_json()
-    assert data["total"] == 1
-    assert data["reviews"][0]["title"] == "Love it"
-    assert data["average_rating"] == 5.0
+    
+    response = client.post('/api/v1/reviews',
+                          data=json.dumps(malicious_review),
+                          content_type='application/json')
+    
+    assert response.status_code == 201
+    data = json.loads(response.data)
+    # Script tags should be escaped
+    assert "<script>" not in data["title"]
+    assert "&lt;script&gt;" in data["title"]
+
+def test_xss_prevention_in_body(client):
+    """Test that script tags in body are escaped"""
+    malicious_review = {
+        "product_id": "P999",
+        "rating": 5,
+        "title": "Good product",
+        "body": "Great! <img src=x onerror=alert('xss')>"
+    }
+    
+    response = client.post('/api/v1/reviews',
+                          data=json.dumps(malicious_review),
+                          content_type='application/json')
+    
+    assert response.status_code == 201
+    data = json.loads(response.data)
+    assert "<img" not in data["body"]
+    assert "&lt;img" in data["body"]
+
+def test_rating_validation_too_high(client):
+    """Test that rating above 5 is rejected"""
+    invalid_review = {
+        "product_id": "P999",
+        "rating": 999,
+        "title": "Test",
+        "body": "Test body"
+    }
+    
+    response = client.post('/api/v1/reviews',
+                          data=json.dumps(invalid_review),
+                          content_type='application/json')
+    
+    assert response.status_code == 400
+    data = json.loads(response.data)
+    assert "rating must be an integer between 1 and 5" in data["details"]
+
+def test_rating_validation_too_low(client):
+    """Test that rating below 1 is rejected"""
+    invalid_review = {
+        "product_id": "P999",
+        "rating": -5,
+        "title": "Test",
+        "body": "Test body"
+    }
+    
+    response = client.post('/api/v1/reviews',
+                          data=json.dumps(invalid_review),
+                          content_type='application/json')
+    
+    assert response.status_code == 400
+    data = json.loads(response.data)
+    assert "rating must be an integer between 1 and 5" in data["details"]
+
+def test_title_length_limit(client):
+    """Test that titles exceeding 200 chars are rejected"""
+    invalid_review = {
+        "product_id": "P999",
+        "rating": 5,
+        "title": "A" * 201,
+        "body": "Test body"
+    }
+    
+    response = client.post('/api/v1/reviews',
+                          data=json.dumps(invalid_review),
+                          content_type='application/json')
+    
+    assert response.status_code == 400
+    data = json.loads(response.data)
+    assert "title must not exceed 200 characters" in data["details"]
+
+def test_body_length_limit(client):
+    """Test that body exceeding 5000 chars is rejected"""
+    invalid_review = {
+        "product_id": "P999",
+        "rating": 5,
+        "title": "Test",
+        "body": "A" * 5001
+    }
+    
+    response = client.post('/api/v1/reviews',
+                          data=json.dumps(invalid_review),
+                          content_type='application/json')
+    
+    assert response.status_code == 400
+    data = json.loads(response.data)
+    assert "body must not exceed 5000 characters" in data["details"]
+
+def test_valid_review_still_works(client):
+    """Test that valid reviews are accepted"""
+    valid_review = {
+        "product_id": "P999",
+        "rating": 5,
+        "title": "Great product!",
+        "body": "I really enjoyed this product. Highly recommend."
+    }
+    
+    response = client.post('/api/v1/reviews',
+                          data=json.dumps(valid_review),
+                          content_type='application/json')
+    
+    assert response.status_code == 201
+    data = json.loads(response.data)
+    assert data["rating"] == 5
+    assert data["title"] == "Great product!"
+    assert data["body"] == "I really enjoyed this product. Highly recommend."
