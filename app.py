@@ -27,6 +27,7 @@ reviews_db = {
 }
 
 review_counter = 4
+helpful_votes_tracker = set()  # Tracks (user_id, review_id) to prevent duplicate votes
 
 @app.route("/health")
 def health():
@@ -88,6 +89,45 @@ def create_review():
 
     return jsonify(review), 201
 
+@app.route("/api/v1/reviews/<review_id>/helpful", methods=["POST"])
+def mark_helpful(review_id):
+    """Mark a review as helpful. Prevents duplicate votes from same user."""
+    data = request.get_json() or {}
+    user_id = data.get("user_id")
+    
+    if not user_id:
+        return jsonify({"error": "user_id is required"}), 400
+    
+    # Find the review across all products
+    review = None
+    for product_reviews in reviews_db.values():
+        for r in product_reviews:
+            if r["id"] == review_id:
+                review = r
+                break
+        if review:
+            break
+    
+    if not review:
+        return jsonify({"error": "Review not found"}), 404
+    
+    # Check if user already voted
+    vote_key = (user_id, review_id)
+    if vote_key in helpful_votes_tracker:
+        return jsonify({"error": "You have already marked this review as helpful"}), 409
+    
+    # Record the vote
+    helpful_votes_tracker.add(vote_key)
+    review["helpful_votes"] += 1
+    
+    logger.info(f"User {user_id} marked review {review_id} as helpful")
+    
+    return jsonify({
+        "review_id": review_id,
+        "helpful_votes": review["helpful_votes"],
+        "message": "Review marked as helpful"
+    }), 200
+
 @app.route("/api/v1/reviews/stats")
 def review_stats():
     total_reviews = sum(len(reviews) for reviews in reviews_db.values())
@@ -106,43 +146,9 @@ def review_stats():
 
 @app.route("/metrics")
 def metrics():
-    total = sum(len(r) for r in reviews_db.values())
-    return f"""# HELP reviews_total Total reviews stored
-# TYPE reviews_total gauge
-reviews_total {total}
-# HELP review_service_up Service health
-# TYPE review_service_up gauge
-review_service_up 1
-"""
+    total = sum(len(reviews) for reviews in reviews_db.values())
+    return f"review_service_total_reviews {total}\n"
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
-# HTML sanitizer
-# Rating validation
-# Purchase verification
-# Image upload handler
-# Cursor pagination
-# Vote handler
-# Seller response
-# Length validation
-
-
-# --- refactor: move rating to shared utils ---
-"""Tests for upload in review-service."""
-import pytest
-import time
-
-
-class TestUpload:
-    """Test suite for upload operations."""
-
-    def test_health_endpoint(self, client):
-        """Health endpoint should return UP."""
-        response = client.get("/health")
-        assert response.status_code == 200
-        data = response.get_json()
-        assert data["status"] == "UP"
-
-    def test_upload_create(self, client):
-        """Should create a new upload entry."""
-        payload = {"name": "test", "value": 42}
+    port = int(os.environ.get("PORT", 5003))
+    app.run(host="0.0.0.0", port=port, debug=True)
