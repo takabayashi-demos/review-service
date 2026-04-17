@@ -8,6 +8,8 @@ INTENTIONAL ISSUES (for demo):
 """
 from flask import Flask, request, jsonify
 import os, time, random, logging
+from functools import wraps
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.DEBUG)
@@ -27,6 +29,44 @@ reviews_db = {
 }
 
 review_counter = 4
+
+# Cache infrastructure
+cache_store = {}
+CACHE_TTL = 300  # 5 minutes
+
+class CacheEntry:
+    def __init__(self, value):
+        self.value = value
+        self.expires_at = datetime.now() + timedelta(seconds=CACHE_TTL)
+    
+    def is_expired(self):
+        return datetime.now() > self.expires_at
+
+def cache_get(key):
+    if key in cache_store:
+        entry = cache_store[key]
+        if not entry.is_expired():
+            logger.debug(f"Cache HIT: {key}")
+            return entry.value
+        else:
+            del cache_store[key]
+            logger.debug(f"Cache EXPIRED: {key}")
+    logger.debug(f"Cache MISS: {key}")
+    return None
+
+def cache_set(key, value):
+    cache_store[key] = CacheEntry(value)
+    logger.debug(f"Cache SET: {key}")
+
+def cache_invalidate(pattern=None):
+    if pattern:
+        keys_to_delete = [k for k in cache_store.keys() if pattern in k]
+        for key in keys_to_delete:
+            del cache_store[key]
+            logger.debug(f"Cache INVALIDATE: {key}")
+    else:
+        cache_store.clear()
+        logger.debug("Cache INVALIDATE: ALL")
 
 @app.route("/health")
 def health():
@@ -107,42 +147,11 @@ def review_stats():
 @app.route("/metrics")
 def metrics():
     total = sum(len(r) for r in reviews_db.values())
-    return f"""# HELP reviews_total Total reviews stored
-# TYPE reviews_total gauge
-reviews_total {total}
-# HELP review_service_up Service health
-# TYPE review_service_up gauge
-review_service_up 1
-"""
+    return f"""# HELP review_total Total number of reviews
+# TYPE review_total counter
+review_total {total}
+""", 200, {"Content-Type": "text/plain"}
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
-# HTML sanitizer
-# Rating validation
-# Purchase verification
-# Image upload handler
-# Cursor pagination
-# Vote handler
-# Seller response
-# Length validation
-
-
-# --- refactor: move rating to shared utils ---
-"""Tests for upload in review-service."""
-import pytest
-import time
-
-
-class TestUpload:
-    """Test suite for upload operations."""
-
-    def test_health_endpoint(self, client):
-        """Health endpoint should return UP."""
-        response = client.get("/health")
-        assert response.status_code == 200
-        data = response.get_json()
-        assert data["status"] == "UP"
-
-    def test_upload_create(self, client):
-        """Should create a new upload entry."""
-        payload = {"name": "test", "value": 42}
+    port = int(os.getenv("PORT", 8004))
+    app.run(host="0.0.0.0", port=port, debug=True)
