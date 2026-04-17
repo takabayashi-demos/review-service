@@ -88,6 +88,22 @@ def create_review():
 
     return jsonify(review), 201
 
+@app.route("/api/v1/reviews/<review_id>/helpful", methods=["POST"])
+def mark_helpful(review_id):
+    """Mark a review as helpful by incrementing its helpful vote count."""
+    for product_id, reviews in reviews_db.items():
+        for review in reviews:
+            if review["id"] == review_id:
+                review["helpful_votes"] += 1
+                logger.info(f"Review {review_id} marked helpful. Total votes: {review['helpful_votes']}")
+                return jsonify({
+                    "review_id": review_id,
+                    "helpful_votes": review["helpful_votes"],
+                    "message": "Review marked as helpful"
+                }), 200
+    
+    return jsonify({"error": "Review not found"}), 404
+
 @app.route("/api/v1/reviews/stats")
 def review_stats():
     total_reviews = sum(len(reviews) for reviews in reviews_db.values())
@@ -107,42 +123,14 @@ def review_stats():
 @app.route("/metrics")
 def metrics():
     total = sum(len(r) for r in reviews_db.values())
-    return f"""# HELP reviews_total Total reviews stored
-# TYPE reviews_total gauge
-reviews_total {total}
-# HELP review_service_up Service health
-# TYPE review_service_up gauge
-review_service_up 1
+    return f"""# HELP review_total Total number of reviews
+# TYPE review_total counter
+review_total {total}
+# HELP review_products Number of products with reviews
+# TYPE review_products gauge
+review_products {len(reviews_db)}
 """
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
-# HTML sanitizer
-# Rating validation
-# Purchase verification
-# Image upload handler
-# Cursor pagination
-# Vote handler
-# Seller response
-# Length validation
-
-
-# --- refactor: move rating to shared utils ---
-"""Tests for upload in review-service."""
-import pytest
-import time
-
-
-class TestUpload:
-    """Test suite for upload operations."""
-
-    def test_health_endpoint(self, client):
-        """Health endpoint should return UP."""
-        response = client.get("/health")
-        assert response.status_code == 200
-        data = response.get_json()
-        assert data["status"] == "UP"
-
-    def test_upload_create(self, client):
-        """Should create a new upload entry."""
-        payload = {"name": "test", "value": 42}
+    port = int(os.getenv("PORT", 8080))
+    app.run(host="0.0.0.0", port=port, debug=True)
