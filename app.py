@@ -78,17 +78,26 @@ def ready():
 
 @app.route("/api/v1/reviews/<product_id>")
 def get_reviews(product_id):
+    cache_key = f"reviews:{product_id}"
+    cached = cache_get(cache_key)
+    if cached:
+        return jsonify(cached)
+
     product_reviews = reviews_db.get(product_id, [])
     if not product_reviews:
-        return jsonify({"product_id": product_id, "reviews": [], "average_rating": 0, "total": 0})
+        result = {"product_id": product_id, "reviews": [], "average_rating": 0, "total": 0}
+        cache_set(cache_key, result)
+        return jsonify(result)
 
     avg = sum(r["rating"] for r in product_reviews) / len(product_reviews)
-    return jsonify({
+    result = {
         "product_id": product_id,
         "reviews": product_reviews,
         "average_rating": round(avg, 1),
         "total": len(product_reviews),
-    })
+    }
+    cache_set(cache_key, result)
+    return jsonify(result)
 
 @app.route("/api/v1/reviews", methods=["POST"])
 def create_review():
@@ -126,23 +135,34 @@ def create_review():
         reviews_db[product_id] = []
     reviews_db[product_id].append(review)
 
+    # Invalidate affected caches
+    cache_invalidate(f"reviews:{product_id}")
+    cache_invalidate("stats")
+
     return jsonify(review), 201
 
 @app.route("/api/v1/reviews/stats")
 def review_stats():
+    cache_key = "stats"
+    cached = cache_get(cache_key)
+    if cached:
+        return jsonify(cached)
+
     total_reviews = sum(len(reviews) for reviews in reviews_db.values())
     products_reviewed = len(reviews_db)
     all_ratings = [r["rating"] for reviews in reviews_db.values() for r in reviews]
     avg_rating = sum(all_ratings) / len(all_ratings) if all_ratings else 0
 
-    return jsonify({
+    result = {
         "total_reviews": total_reviews,
         "products_reviewed": products_reviewed,
         "average_rating": round(avg_rating, 1),
         "rating_distribution": {
             str(i): len([r for r in all_ratings if r == i]) for i in range(1, 6)
         },
-    })
+    }
+    cache_set(cache_key, result)
+    return jsonify(result)
 
 @app.route("/metrics")
 def metrics():
